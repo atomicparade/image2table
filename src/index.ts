@@ -101,19 +101,62 @@ async function scaleImage(image: string, scale: number): Promise<string> {
 function processOcrData(page: Page, threshold: number): Table {
   const table: Table = [];
 
+  const columnRanges: IntRange[] = [];
+
   // Determine column positions based on threshold
-  // TODO
+  for (let i = 0, iN = page.symbols.length; i < iN; i += 1) {
+    const symbol = page.symbols[i];
+    columnRanges.push({ start: symbol.bbox.x0, end: symbol.bbox.x1 });
+  }
+
+  const columnRangeSet = new IntRangeSet(columnRanges, threshold);
 
   // Determine cell contents based on column positions
-  // TODO
-
   for (let i = 0, iN = page.lines.length; i < iN; i += 1) {
     const line = page.lines[i];
 
     const row: Row = [];
+    let cellContents: string | null = null;
+    let currentColumn: number | null = null;
 
     for (let j = 0, jN = line.words.length; j < jN; j += 1) {
-      row.push(line.words[j].text);
+      const word = line.words[j];
+
+      let thisWordColumn = columnRangeSet.getIndex(word.bbox.x0);
+
+      if (thisWordColumn === currentColumn) {
+        if (cellContents === null) {
+          cellContents = word.text;
+        } else {
+          cellContents = `${cellContents}${word.text}`;
+        }
+      } else {
+        if (cellContents !== null) {
+          row.push(cellContents);
+        }
+
+        if (currentColumn === null) {
+          currentColumn = 0;
+        }
+
+        // Technically, this should never happen, because every symbol's bbox.x1
+        // is included in columnRangeSet
+        if (thisWordColumn === null) {
+          thisWordColumn = currentColumn;
+        }
+
+        while (thisWordColumn > currentColumn) {
+          row.push('');
+          currentColumn += 1;
+        }
+
+        cellContents = word.text;
+      }
+    }
+
+    // Add the contents of the last cell to the row
+    if (cellContents !== null) {
+      row.push(cellContents);
     }
 
     table.push(row);

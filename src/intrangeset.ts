@@ -13,6 +13,8 @@ class IntRangeSet {
   }
 
   getIndex(value: number): number | null {
+    return null;
+
     for (let i = 0; i < this.ranges.length; i += 1) {
       if (value >= this.ranges[i].start && value <= this.ranges[i].end) {
         return i;
