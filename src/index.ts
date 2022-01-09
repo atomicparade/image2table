@@ -9,8 +9,10 @@ import IntRangeSet from './intrangeset';
 
 const NUM_WORKERS = 3; // This many images can be processed simultneously
 const SCALE = 3; // Higher scale leads to better accuracy, but longer processing time
-const THRESHOLD = 10; // Maximum number of pixels distance to form a continuous column
+const THRESHOLD = 5; // Maximum number of pixels distance to form a continuous column
 const DELIMITER = '\t';
+const CONFIDENCE_THRESHOLD = 90;
+const LOW_CONFIDENCE_MARKER = ' (?)';
 
 type MessageType =
   | 'info'
@@ -117,21 +119,28 @@ function processOcrData(page: Page, threshold: number): Table {
 
     const row: Row = [];
     let cellContents: string | null = null;
+    let cellConfidence = 100;
     let currentColumn: number | null = null;
 
     for (let j = 0, jN = line.words.length; j < jN; j += 1) {
       const word = line.words[j];
 
-      let thisWordColumn = columnRangeSet.getIndex(word.bbox.x0);
+      cellConfidence = Math.min(cellConfidence, word.confidence);
+
+      const thisWordColumn = columnRangeSet.getIndex(word.bbox.x0);
 
       if (thisWordColumn === currentColumn) {
         if (cellContents === null) {
           cellContents = word.text;
         } else {
-          cellContents = `${cellContents}${word.text}`;
+          cellContents = `${cellContents} ${word.text}`;
         }
       } else {
         if (cellContents !== null) {
+          if (cellConfidence < CONFIDENCE_THRESHOLD) {
+            cellContents = `${cellContents}${LOW_CONFIDENCE_MARKER}`;
+          }
+
           row.push(cellContents);
         }
 
@@ -139,23 +148,28 @@ function processOcrData(page: Page, threshold: number): Table {
           currentColumn = 0;
         }
 
-        // Technically, this should never happen, because every symbol's bbox.x1
-        // is included in columnRangeSet
-        if (thisWordColumn === null) {
-          thisWordColumn = currentColumn;
+        // thisWordColumn should never be null, because all symbols' bbox.x0s
+        // are added to columnRangeSet
+        if (thisWordColumn !== null) {
+          // Add blank cells for skipped columns
+          for (let k = (thisWordColumn - currentColumn) - 1; k > 0; k -= 1) {
+            row.push('');
+          }
         }
 
-        while (thisWordColumn > currentColumn) {
-          row.push('');
-          currentColumn += 1;
-        }
-
+        // Begin a new cell
         cellContents = word.text;
+        cellConfidence = 100;
+        currentColumn = thisWordColumn;
       }
     }
 
     // Add the contents of the last cell to the row
     if (cellContents !== null) {
+      if (cellConfidence < CONFIDENCE_THRESHOLD) {
+        cellContents = `${cellContents}${LOW_CONFIDENCE_MARKER}`;
+      }
+
       row.push(cellContents);
     }
 
@@ -287,7 +301,7 @@ async function handlePaste(event: ClipboardEvent, scheduler: Scheduler): Promise
       const file = item.getAsFile();
 
       if (file instanceof File) {
-        promises.push(createAppRequest(scheduler, file, SCALE, THRESHOLD, DELIMITER));
+        promises.push(createAppRequest(scheduler, file, SCALE, SCALE * THRESHOLD, DELIMITER));
       }
     }
   }
