@@ -26,10 +26,6 @@ p.error {
   background: #fdd;
 }
 
-p.image {
-  margin-bottom: 0;
-}
-
 section {
   background: #eee;
   border: 1px solid #000;
@@ -39,4 +35,15 @@ section {
 
 section p.message {
   margin-top: 0;
+}
+
+section p.image {
+  margin-bottom: 0;
+  max-height: 10em;
+  overflow-y: auto;
+}
+
+section img {
+  border: 1px solid #000;
+  max-width: 100%;
 }

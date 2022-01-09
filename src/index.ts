@@ -40,6 +40,25 @@ class MessageContainer {
   }
 }
 
+function readFileAsDataURL(file: File): Promise<string> {
+  const fileReader = new FileReader();
+
+  const promise = new Promise<string>((resolve, reject) => {
+    fileReader.onload = (event) => {
+      if (event.target === null || typeof (event.target.result) !== 'string') {
+        reject(Error('Unable to load file as data URL'));
+        return;
+      }
+
+      resolve(event.target.result);
+    };
+  });
+
+  fileReader.readAsDataURL(file);
+
+  return promise;
+}
+
 async function scaleImage(image: string, scale: number): Promise<string> {
   const img = document.createElement('img');
 
@@ -95,12 +114,14 @@ class AppRequest {
   }
 }
 
-function createAppRequest(image: string, scale: number, threshold: number): void {
+async function createAppRequest(file: File, scale: number, threshold: number): Promise<void> {
   const appRequestContainer = document.getElementById('appRequestContainer');
 
   if (!appRequestContainer) {
     throw new Error('Unable to obtain #appRequestContainer');
   }
+
+  const image = await readFileAsDataURL(file);
 
   const appRequest = new AppRequest(image, scale, threshold);
 
@@ -108,9 +129,27 @@ function createAppRequest(image: string, scale: number, threshold: number): void
 }
 
 async function handlePaste(event: ClipboardEvent): Promise<void> {
-  console.log(event);
+  if (event.clipboardData === null) {
+    return;
+  }
 
-  createAppRequest('123', SCALE, THRESHOLD);
+  const { items } = event.clipboardData;
+
+  const promises: Promise<void>[] = [];
+
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+
+      if (file instanceof File) {
+        promises.push(createAppRequest(file, SCALE, THRESHOLD));
+      }
+    }
+  }
+
+  await Promise.all(promises);
 }
 
 async function init(): Promise<void> {
