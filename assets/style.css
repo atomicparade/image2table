@@ -50,7 +50,7 @@ section img {
 
 section textarea {
   width: calc(100% - 1em);
-  height: 8em;
+  height: 10em;
   overflow-wrap: normal;
   overflow-x: scroll;
   white-space: pre;
