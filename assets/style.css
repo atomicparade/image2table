@@ -53,7 +53,6 @@ section textarea {
   height: 8em;
   overflow-wrap: normal;
   overflow-x: scroll;
-  tab-size: 20;
   white-space: pre;
 }
 

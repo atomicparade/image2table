@@ -247,11 +247,17 @@ class AppRequest {
 
     let text = '';
 
+    let lengthOfLongestWord = 1;
+
     for (let i = 0, iN = table.length; i < iN; i += 1) {
       const row = table[i];
 
       for (let j = 0, jN = row.length; j < jN; j += 1) {
-        text = `${text}${row[j]}${delimiter}`;
+        const cell = row[j];
+
+        lengthOfLongestWord = Math.max(cell.length, lengthOfLongestWord);
+
+        text = `${text}${cell}${delimiter}`;
       }
 
       // Remove the last delimiter
@@ -262,6 +268,7 @@ class AppRequest {
       text = `${text}\n`;
     }
 
+    this.elTextarea.setAttribute('style', `tab-size: ${lengthOfLongestWord + 2}`);
     this.elTextarea.value = text;
   }
 }
