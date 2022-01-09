@@ -51,6 +51,10 @@ section img {
 section textarea {
   width: calc(100% - 1em);
   height: 8em;
+  overflow-wrap: normal;
+  overflow-x: scroll;
+  tab-size: 20;
+  white-space: pre;
 }
 
 .hidden {

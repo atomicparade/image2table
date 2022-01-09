@@ -1,6 +1,8 @@
 /* eslint max-classes-per-file: 0 */
 
-import { createScheduler, createWorker, Scheduler } from 'tesseract.js';
+import {
+  createScheduler, createWorker, Page, RecognizeResult, Scheduler,
+} from 'tesseract.js';
 
 import IntRange from './intrange';
 import IntRangeSet from './intrangeset';
@@ -8,11 +10,20 @@ import IntRangeSet from './intrangeset';
 const NUM_WORKERS = 3; // This many images can be processed simultneously
 const SCALE = 3; // Higher scale leads to better accuracy, but longer processing time
 const THRESHOLD = 10; // Maximum number of pixels distance to form a continuous column
+const DELIMITER = '\t';
 
 type MessageType =
   | 'info'
   | 'error'
 ;
+
+type Row = string[];
+
+type Table = Row[];
+
+function isType<T>(value: any): value is T {
+  return (value as T) !== undefined;
+}
 
 class MessageContainer {
   readonly el: HTMLElement;
@@ -87,6 +98,30 @@ async function scaleImage(image: string, scale: number): Promise<string> {
   return canvas.toDataURL();
 }
 
+function processOcrData(page: Page, threshold: number): Table {
+  const table: Table = [];
+
+  // Determine column positions based on threshold
+  // TODO
+
+  // Determine cell contents based on column positions
+  // TODO
+
+  for (let i = 0, iN = page.lines.length; i < iN; i += 1) {
+    const line = page.lines[i];
+
+    const row: Row = [];
+
+    for (let j = 0, jN = line.words.length; j < jN; j += 1) {
+      row.push(line.words[j].text);
+    }
+
+    table.push(row);
+  }
+
+  return table;
+}
+
 class AppRequest {
   readonly el: HTMLElement;
 
@@ -121,6 +156,7 @@ class AppRequest {
     image: string,
     scale: number,
     threshold: number,
+    delimiter: string,
   ): Promise<void> {
     this.elImg.src = image;
 
@@ -132,10 +168,14 @@ class AppRequest {
     const scaledImage = await scaleImage(image, scale);
 
     this.messageContainer.setMessage('Converting image to text...please wait.');
-    const { data } = await scheduler.addJob('recognize', scaledImage);
+    const result = await scheduler.addJob('recognize', scaledImage);
+    if (!isType<RecognizeResult>(result)) {
+      throw new Error('Tesseract did not return a RecognizeResult');
+    }
+    const { data } = result;
 
     this.messageContainer.setMessage('Processing data in image...please wait.');
-    // TODO: Process OCR data
+    const table = processOcrData(data, threshold);
 
     const endTime = new Date();
     const jobDurationSeconds = (endTime.getTime() - startTime.getTime()) / 1000;
@@ -147,7 +187,25 @@ class AppRequest {
     this.messageContainer.setMessage(`Image processing completed in ${jobDurationSecondsStr} seconds.`);
 
     this.elTextarea.classList.remove('hidden');
-    this.elTextarea.value = data.text;
+
+    let text = '';
+
+    for (let i = 0, iN = table.length; i < iN; i += 1) {
+      const row = table[i];
+
+      for (let j = 0, jN = row.length; j < jN; j += 1) {
+        text = `${text}${row[j]}${delimiter}`;
+      }
+
+      // Remove the last delimiter
+      if (row.length >= 1) {
+        text = text.slice(0, -1);
+      }
+
+      text = `${text}\n`;
+    }
+
+    this.elTextarea.value = text;
   }
 }
 
@@ -156,6 +214,7 @@ async function createAppRequest(
   file: File,
   scale: number,
   threshold: number,
+  delimiter: string,
 ): Promise<void> {
   const appRequestContainer = document.getElementById('appRequestContainer');
 
@@ -166,7 +225,7 @@ async function createAppRequest(
   const image = await readFileAsDataURL(file);
 
   const appRequest = new AppRequest(appRequestContainer);
-  await appRequest.start(scheduler, image, scale, threshold);
+  await appRequest.start(scheduler, image, scale, threshold, delimiter);
 }
 
 async function handlePaste(event: ClipboardEvent, scheduler: Scheduler): Promise<void> {
@@ -178,14 +237,14 @@ async function handlePaste(event: ClipboardEvent, scheduler: Scheduler): Promise
 
   const promises: Promise<void>[] = [];
 
-  for (let i = 0; i < items.length; i += 1) {
+  for (let i = 0, iN = items.length; i < iN; i += 1) {
     const item = items[i];
 
     if (item.kind === 'file') {
       const file = item.getAsFile();
 
       if (file instanceof File) {
-        promises.push(createAppRequest(scheduler, file, SCALE, THRESHOLD));
+        promises.push(createAppRequest(scheduler, file, SCALE, THRESHOLD, DELIMITER));
       }
     }
   }
