@@ -25,3 +25,18 @@ p.info {
 p.error {
   background: #fdd;
 }
+
+p.image {
+  margin-bottom: 0;
+}
+
+section {
+  background: #eee;
+  border: 1px solid #000;
+  margin: 1em 0 0;
+  padding: 0.5em;
+}
+
+section p.message {
+  margin-top: 0;
+}
