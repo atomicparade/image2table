@@ -47,3 +47,12 @@ section img {
   border: 1px solid #000;
   max-width: 100%;
 }
+
+section textarea {
+  width: calc(100% - 1em);
+  height: 8em;
+}
+
+.hidden {
+  display: none;
+}

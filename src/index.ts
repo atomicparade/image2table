@@ -1,12 +1,12 @@
 /* eslint max-classes-per-file: 0 */
 
-import { createScheduler, createWorker } from 'tesseract.js';
+import { createScheduler, createWorker, Scheduler } from 'tesseract.js';
 
 import IntRange from './intrange';
 import IntRangeSet from './intrangeset';
 
 const NUM_WORKERS = 3; // This many images can be processed simultneously
-const SCALE = 2; // Higher scale leads to better accuracy, but longer processing time
+const SCALE = 3; // Higher scale leads to better accuracy, but longer processing time
 const THRESHOLD = 10; // Maximum number of pixels distance to form a continuous column
 
 type MessageType =
@@ -90,31 +90,73 @@ async function scaleImage(image: string, scale: number): Promise<string> {
 class AppRequest {
   readonly el: HTMLElement;
 
+  readonly elImg: HTMLImageElement;
+
+  readonly elTextarea: HTMLTextAreaElement;
+
   readonly messageContainer: MessageContainer;
 
-  constructor(image: string, scale: number, threshold: number) {
-    this.messageContainer = new MessageContainer('Loading...please wait.');
-
+  constructor(appRequestContainer: HTMLElement) {
     this.el = document.createElement('section');
+    appRequestContainer.insertBefore(this.el, appRequestContainer.firstChild);
 
+    this.messageContainer = new MessageContainer('Loading...please wait.');
     this.el.appendChild(this.messageContainer.el);
+
+    this.elTextarea = document.createElement('textarea');
+    this.el.appendChild(this.elTextarea);
+    this.elTextarea.classList.add('hidden');
 
     const pImg = document.createElement('p');
     pImg.className = 'image';
 
-    const img = document.createElement('img');
-    img.src = image;
+    this.elImg = document.createElement('img');
 
-    pImg.appendChild(img);
+    pImg.appendChild(this.elImg);
     this.el.appendChild(pImg);
+  }
 
-    const scaledImage = scaleImage(image, scale);
+  async start(
+    scheduler: Scheduler,
+    image: string,
+    scale: number,
+    threshold: number,
+  ): Promise<void> {
+    this.elImg.src = image;
 
-    // TODO: Operate on scaledImage
+    this.elTextarea.classList.add('hidden');
+
+    const startTime = new Date();
+
+    this.messageContainer.setMessage('Resizing image to improve accuracy...please wait.');
+    const scaledImage = await scaleImage(image, scale);
+
+    this.messageContainer.setMessage('Converting image to text...please wait.');
+    const { data } = await scheduler.addJob('recognize', scaledImage);
+
+    this.messageContainer.setMessage('Processing data in image...please wait.');
+    // TODO: Process OCR data
+
+    const endTime = new Date();
+    const jobDurationSeconds = (endTime.getTime() - startTime.getTime()) / 1000;
+    const jobDurationSecondsStr = jobDurationSeconds.toLocaleString(
+      undefined, // Use default locale
+      { maximumFractionDigits: 2, minimumFractionDigits: 2 },
+    );
+
+    this.messageContainer.setMessage(`Image processing completed in ${jobDurationSecondsStr} seconds.`);
+
+    this.elTextarea.classList.remove('hidden');
+    this.elTextarea.value = data.text;
   }
 }
 
-async function createAppRequest(file: File, scale: number, threshold: number): Promise<void> {
+async function createAppRequest(
+  scheduler: Scheduler,
+  file: File,
+  scale: number,
+  threshold: number,
+): Promise<void> {
   const appRequestContainer = document.getElementById('appRequestContainer');
 
   if (!appRequestContainer) {
@@ -123,12 +165,11 @@ async function createAppRequest(file: File, scale: number, threshold: number): P
 
   const image = await readFileAsDataURL(file);
 
-  const appRequest = new AppRequest(image, scale, threshold);
-
-  appRequestContainer.insertBefore(appRequest.el, appRequestContainer.firstChild);
+  const appRequest = new AppRequest(appRequestContainer);
+  await appRequest.start(scheduler, image, scale, threshold);
 }
 
-async function handlePaste(event: ClipboardEvent): Promise<void> {
+async function handlePaste(event: ClipboardEvent, scheduler: Scheduler): Promise<void> {
   if (event.clipboardData === null) {
     return;
   }
@@ -144,12 +185,22 @@ async function handlePaste(event: ClipboardEvent): Promise<void> {
       const file = item.getAsFile();
 
       if (file instanceof File) {
-        promises.push(createAppRequest(file, SCALE, THRESHOLD));
+        promises.push(createAppRequest(scheduler, file, SCALE, THRESHOLD));
       }
     }
   }
 
   await Promise.all(promises);
+}
+
+async function addWorker(scheduler: Scheduler): Promise<void> {
+  const worker = createWorker();
+
+  await worker.load();
+  await worker.loadLanguage('eng');
+  await worker.initialize('eng');
+
+  scheduler.addWorker(worker);
 }
 
 async function init(): Promise<void> {
@@ -160,9 +211,21 @@ async function init(): Promise<void> {
   document.body.appendChild(appMessageContainer.el);
   document.body.appendChild(appRequestContainer);
 
-  // TODO: createScheduler(), createWorker()
+  const scheduler = createScheduler();
 
-  document.addEventListener('paste', handlePaste);
+  const workerPromises: Promise<void>[] = [];
+
+  for (let i = 0; i < NUM_WORKERS; i += 1) {
+    workerPromises.push((async (): Promise<void> => {
+      await addWorker(scheduler);
+    })());
+  }
+
+  await Promise.all(workerPromises);
+
+  document.addEventListener('paste', async (event: ClipboardEvent): Promise<void> => {
+    await handlePaste(event, scheduler);
+  });
 
   appMessageContainer.setMessage('Please paste an image.');
 }
