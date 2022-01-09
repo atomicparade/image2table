@@ -1,7 +1,7 @@
 /* eslint max-classes-per-file: 0 */
 
 import {
-  createScheduler, createWorker, Page, RecognizeResult, Scheduler,
+  Bbox, createScheduler, createWorker, Page, RecognizeResult, Scheduler,
 } from 'tesseract.js';
 
 import IntRange from './intrange';
@@ -22,6 +22,11 @@ type MessageType =
 type Row = string[];
 
 type Table = Row[];
+
+interface OcrProcessingResult {
+  table: Table;
+  lowConfidenceBoxes: Bbox[];
+}
 
 function isType<T>(value: any): value is T {
   return (value as T) !== undefined;
@@ -100,8 +105,9 @@ async function scaleImage(image: string, scale: number): Promise<string> {
   return canvas.toDataURL();
 }
 
-function processOcrData(page: Page, threshold: number): Table {
+function processOcrData(page: Page, threshold: number): OcrProcessingResult {
   const table: Table = [];
+  const lowConfidenceBoxes: Bbox[] = [];
 
   const columnRanges: IntRange[] = [];
 
@@ -124,6 +130,15 @@ function processOcrData(page: Page, threshold: number): Table {
 
     for (let j = 0, jN = line.words.length; j < jN; j += 1) {
       const word = line.words[j];
+
+      if (word.confidence < CONFIDENCE_THRESHOLD) {
+        lowConfidenceBoxes.push({
+          x0: word.bbox.x0 / SCALE,
+          y0: word.bbox.y0 / SCALE,
+          x1: word.bbox.x1 / SCALE,
+          y1: word.bbox.y1 / SCALE,
+        });
+      }
 
       const thisWordColumn = columnRangeSet.getIndex(word.bbox.x0);
 
@@ -176,7 +191,42 @@ function processOcrData(page: Page, threshold: number): Table {
     table.push(row);
   }
 
-  return table;
+  return { table, lowConfidenceBoxes };
+}
+
+async function markBoxes(image: string, boxes: Bbox[]): Promise<string> {
+  const img = document.createElement('img');
+
+  await new Promise((resolve) => {
+    img.onload = resolve;
+    img.src = image;
+  });
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error('Unable to retrieve canvas context');
+  }
+
+  canvas.width = img.width;
+  canvas.height = img.height;
+
+  context.drawImage(img, 0, 0);
+
+  context.strokeStyle = '#ff0000';
+  context.lineWidth = 2;
+
+  for (let i = 0, iN = boxes.length; i < iN; i += 1) {
+    const box = boxes[i];
+    const x = box.x0;
+    const y = box.y0;
+    const width = box.x1 - x;
+    const height = box.y1 - y;
+    context.strokeRect(x - 2, y - 2, width + 4, height + 4);
+  }
+
+  return canvas.toDataURL();
 }
 
 class AppRequest {
@@ -232,7 +282,7 @@ class AppRequest {
     const { data } = result;
 
     this.messageContainer.setMessage('Processing data in image...please wait.');
-    const table = processOcrData(data, threshold);
+    const { table, lowConfidenceBoxes } = processOcrData(data, threshold);
 
     const endTime = new Date();
     const jobDurationSeconds = (endTime.getTime() - startTime.getTime()) / 1000;
@@ -270,6 +320,10 @@ class AppRequest {
 
     this.elTextarea.setAttribute('style', `tab-size: ${lengthOfLongestWord + 2}`);
     this.elTextarea.value = text;
+
+    // Mark words with low confidence on the image
+    const markedImage = await markBoxes(image, lowConfidenceBoxes);
+    this.elImg.src = markedImage;
   }
 }
 
