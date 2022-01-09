@@ -125,11 +125,11 @@ function processOcrData(page: Page, threshold: number): Table {
     for (let j = 0, jN = line.words.length; j < jN; j += 1) {
       const word = line.words[j];
 
-      cellConfidence = Math.min(cellConfidence, word.confidence);
-
       const thisWordColumn = columnRangeSet.getIndex(word.bbox.x0);
 
       if (thisWordColumn === currentColumn) {
+        cellConfidence = Math.min(cellConfidence, word.confidence);
+
         if (cellContents === null) {
           cellContents = word.text;
         } else {
@@ -159,7 +159,7 @@ function processOcrData(page: Page, threshold: number): Table {
 
         // Begin a new cell
         cellContents = word.text;
-        cellConfidence = 100;
+        cellConfidence = word.confidence;
         currentColumn = thisWordColumn;
       }
     }
