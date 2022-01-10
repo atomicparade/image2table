@@ -56,6 +56,40 @@ section textarea {
   white-space: pre;
 }
 
+label {
+  font-weight: bold;
+  margin: 0 1ex;
+}
+
+label:first-child {
+  margin-left: 0;
+}
+
+label.range {
+  display: inline-block;
+  width: 25ex;
+}
+
+input {
+  margin-right: 1ex;
+}
+
+input[type="range"] {
+  height: 1ex;
+}
+
+input[type="text"] {
+  width: 10ex;
+}
+
+input[type="radio"] {
+  margin-right: 0;
+}
+
+label.radio {
+  font-weight: normal;
+}
+
 .hidden {
   display: none;
 }

@@ -8,11 +8,13 @@ import IntRange from './intrange';
 import IntRangeSet from './intrangeset';
 
 const NUM_WORKERS = 3; // This many images can be processed simultneously
-const SCALE = 3; // Higher scale leads to better accuracy, but longer processing time
-const THRESHOLD = 5; // Maximum number of pixels distance to form a continuous column
-const DELIMITER = '\t';
-const CONFIDENCE_THRESHOLD = 90;
-const LOW_CONFIDENCE_MARKER = ' (?)';
+
+const DEFAULTS = {
+  SCALE: 3, // Higher scale leads to better accuracy, but longer processing time
+  COLUMN_THRESHOLD: 5, // Maximum number of pixels distance to form a continuous column
+  CONFIDENCE_THRESHOLD: 90,
+  LOW_CONFIDENCE_MARKER: ' (?)',
+};
 
 type MessageType =
   | 'info'
@@ -22,6 +24,14 @@ type MessageType =
 type Row = string[];
 
 type Table = Row[];
+
+interface ProcessingOptions {
+  scale: number;
+  delimiter: string;
+  columnThreshold: number;
+  confidenceThreshold: number;
+  lowConfidenceMarker: string;
+}
 
 interface OcrProcessingResult {
   table: Table;
@@ -105,19 +115,26 @@ async function scaleImage(image: string, scale: number): Promise<string> {
   return canvas.toDataURL();
 }
 
-function processOcrData(page: Page, threshold: number): OcrProcessingResult {
+function processOcrData(page: Page, processingOptions: ProcessingOptions): OcrProcessingResult {
   const table: Table = [];
   const lowConfidenceBoxes: Bbox[] = [];
 
   const columnRanges: IntRange[] = [];
 
-  // Determine column positions based on threshold
+  const {
+    scale,
+    columnThreshold,
+    confidenceThreshold,
+    lowConfidenceMarker,
+  } = processingOptions;
+
+  // Determine column positions based on column threshold
   for (let i = 0, iN = page.symbols.length; i < iN; i += 1) {
     const symbol = page.symbols[i];
     columnRanges.push({ start: symbol.bbox.x0, end: symbol.bbox.x1 });
   }
 
-  const columnRangeSet = new IntRangeSet(columnRanges, threshold);
+  const columnRangeSet = new IntRangeSet(columnRanges, columnThreshold * scale);
 
   // Determine cell contents based on column positions
   for (let i = 0, iN = page.lines.length; i < iN; i += 1) {
@@ -131,12 +148,12 @@ function processOcrData(page: Page, threshold: number): OcrProcessingResult {
     for (let j = 0, jN = line.words.length; j < jN; j += 1) {
       const word = line.words[j];
 
-      if (word.confidence < CONFIDENCE_THRESHOLD) {
+      if (word.confidence < confidenceThreshold) {
         lowConfidenceBoxes.push({
-          x0: word.bbox.x0 / SCALE,
-          y0: word.bbox.y0 / SCALE,
-          x1: word.bbox.x1 / SCALE,
-          y1: word.bbox.y1 / SCALE,
+          x0: word.bbox.x0 / scale,
+          y0: word.bbox.y0 / scale,
+          x1: word.bbox.x1 / scale,
+          y1: word.bbox.y1 / scale,
         });
       }
 
@@ -152,8 +169,8 @@ function processOcrData(page: Page, threshold: number): OcrProcessingResult {
         }
       } else {
         if (cellContents !== null) {
-          if (cellConfidence < CONFIDENCE_THRESHOLD) {
-            cellContents = `${cellContents}${LOW_CONFIDENCE_MARKER}`;
+          if (cellConfidence < confidenceThreshold) {
+            cellContents = `${cellContents}${lowConfidenceMarker}`;
           }
 
           row.push(cellContents);
@@ -181,8 +198,8 @@ function processOcrData(page: Page, threshold: number): OcrProcessingResult {
 
     // Add the contents of the last cell to the row
     if (cellContents !== null) {
-      if (cellConfidence < CONFIDENCE_THRESHOLD) {
-        cellContents = `${cellContents}${LOW_CONFIDENCE_MARKER}`;
+      if (cellConfidence < confidenceThreshold) {
+        cellContents = `${cellContents}${lowConfidenceMarker}`;
       }
 
       row.push(cellContents);
@@ -261,13 +278,13 @@ class AppRequest {
   async start(
     scheduler: Scheduler,
     image: string,
-    scale: number,
-    threshold: number,
-    delimiter: string,
+    processingOptions: ProcessingOptions,
   ): Promise<void> {
     this.elImg.src = image;
 
     this.elTextarea.classList.add('hidden');
+
+    const { scale, delimiter } = processingOptions;
 
     const startTime = new Date();
 
@@ -282,7 +299,10 @@ class AppRequest {
     const { data } = result;
 
     this.messageContainer.setMessage('Processing data in image...please wait.');
-    const { table, lowConfidenceBoxes } = processOcrData(data, threshold);
+    const { table, lowConfidenceBoxes } = processOcrData(
+      data,
+      processingOptions,
+    );
 
     const endTime = new Date();
     const jobDurationSeconds = (endTime.getTime() - startTime.getTime()) / 1000;
@@ -327,12 +347,48 @@ class AppRequest {
   }
 }
 
+function getProcessingOptions(): ProcessingOptions {
+  const inputScale = document.getElementById('scale');
+  const btnTab = document.getElementById('btnTab');
+  const inputColumnThreshold = document.getElementById('columnThreshold');
+  const inputConfidenceThreshold = document.getElementById('confidenceThreshold');
+  const inputLowConfidenceMarker = document.getElementById('lowConfidenceMarker');
+
+  if (!isType<HTMLInputElement>(inputScale)) {
+    throw new Error('Unable to obtain #inputScale');
+  }
+
+  if (!isType<HTMLInputElement>(btnTab)) {
+    throw new Error('Unable to obtain #btnTab');
+  }
+
+  if (!isType<HTMLInputElement>(inputColumnThreshold)) {
+    throw new Error('Unable to obtain #inputColumnThreshold');
+  }
+
+  if (!isType<HTMLInputElement>(inputConfidenceThreshold)) {
+    throw new Error('Unable to obtain #inputConfidenceThreshold');
+  }
+
+  if (!isType<HTMLInputElement>(inputLowConfidenceMarker)) {
+    throw new Error('Unable to obtain #inputLowConfidenceMarker');
+  }
+
+  const scale = Number.parseInt(inputScale.value, 10);
+  const delimiter = btnTab.checked ? '\t' : ',';
+  const columnThreshold = Number.parseInt(inputColumnThreshold.value, 10);
+  const confidenceThreshold = Number.parseInt(inputConfidenceThreshold.value, 10);
+  const lowConfidenceMarker = inputLowConfidenceMarker.value;
+
+  return {
+    scale, delimiter, columnThreshold, confidenceThreshold, lowConfidenceMarker,
+  };
+}
+
 async function createAppRequest(
   scheduler: Scheduler,
   file: File,
-  scale: number,
-  threshold: number,
-  delimiter: string,
+  processingOptions: ProcessingOptions,
 ): Promise<void> {
   const appRequestContainer = document.getElementById('appRequestContainer');
 
@@ -343,7 +399,7 @@ async function createAppRequest(
   const image = await readFileAsDataURL(file);
 
   const appRequest = new AppRequest(appRequestContainer);
-  await appRequest.start(scheduler, image, scale, threshold, delimiter);
+  await appRequest.start(scheduler, image, processingOptions);
 }
 
 async function handlePaste(event: ClipboardEvent, scheduler: Scheduler): Promise<void> {
@@ -355,6 +411,8 @@ async function handlePaste(event: ClipboardEvent, scheduler: Scheduler): Promise
 
   const promises: Promise<void>[] = [];
 
+  const processingOptions = getProcessingOptions();
+
   for (let i = 0, iN = items.length; i < iN; i += 1) {
     const item = items[i];
 
@@ -362,7 +420,7 @@ async function handlePaste(event: ClipboardEvent, scheduler: Scheduler): Promise
       const file = item.getAsFile();
 
       if (file instanceof File) {
-        promises.push(createAppRequest(scheduler, file, SCALE, SCALE * THRESHOLD, DELIMITER));
+        promises.push(createAppRequest(scheduler, file, processingOptions));
       }
     }
   }
@@ -380,11 +438,121 @@ async function addWorker(scheduler: Scheduler): Promise<void> {
   scheduler.addWorker(worker);
 }
 
+function createOptionsForm(): HTMLFormElement {
+  const form = document.createElement('form');
+  let p;
+
+  {
+    p = document.createElement('p');
+    form.appendChild(p);
+
+    const lblScale = document.createElement('label');
+    p.appendChild(lblScale);
+    lblScale.htmlFor = 'scale';
+    lblScale.classList.add('range');
+    lblScale.appendChild(document.createTextNode('Scale'));
+    const inputScale = document.createElement('input');
+    p.appendChild(document.createTextNode('1'));
+    p.appendChild(inputScale);
+    p.appendChild(document.createTextNode('10'));
+    inputScale.id = 'scale';
+    inputScale.type = 'range';
+    inputScale.value = DEFAULTS.SCALE.toString();
+    inputScale.min = '1';
+    inputScale.max = '10';
+    inputScale.step = '1';
+  }
+
+  {
+    p = document.createElement('p');
+    form.appendChild(p);
+
+    const lblColumnThreshold = document.createElement('label');
+    p.appendChild(lblColumnThreshold);
+    lblColumnThreshold.htmlFor = 'columnThreshold';
+    lblColumnThreshold.classList.add('range');
+    lblColumnThreshold.appendChild(document.createTextNode('Column threshold'));
+    const inputColumnThreshold = document.createElement('input');
+    p.appendChild(document.createTextNode('1'));
+    p.appendChild(inputColumnThreshold);
+    p.appendChild(document.createTextNode('100'));
+    inputColumnThreshold.id = 'columnThreshold';
+    inputColumnThreshold.type = 'range';
+    inputColumnThreshold.value = DEFAULTS.COLUMN_THRESHOLD.toString();
+    inputColumnThreshold.min = '0';
+    inputColumnThreshold.max = '100';
+    inputColumnThreshold.step = '1';
+
+    const lblDelimiter = document.createElement('label');
+    p.appendChild(lblDelimiter);
+    lblDelimiter.appendChild(document.createTextNode('Column Delimiter'));
+
+    const btnTab = document.createElement('input');
+    p.appendChild(btnTab);
+    btnTab.id = 'btnTab';
+    btnTab.type = 'radio';
+    btnTab.name = 'delimiter';
+    btnTab.value = 'tab';
+    btnTab.checked = true;
+    const lblTab = document.createElement('label');
+    p.appendChild(lblTab);
+    lblTab.classList.add('radio');
+    lblTab.htmlFor = 'btnTab';
+    lblTab.appendChild(document.createTextNode('Tab'));
+
+    const btnComma = document.createElement('input');
+    p.appendChild(btnComma);
+    btnComma.id = 'btnComma';
+    btnComma.type = 'radio';
+    btnComma.name = 'delimiter';
+    btnComma.value = 'comma';
+    const lblComma = document.createElement('label');
+    p.appendChild(lblComma);
+    lblComma.classList.add('radio');
+    lblComma.htmlFor = 'btnComma';
+    lblComma.appendChild(document.createTextNode('Comma'));
+  }
+
+  {
+    p = document.createElement('p');
+    form.appendChild(p);
+
+    const lblConfidenceThreshold = document.createElement('label');
+    p.appendChild(lblConfidenceThreshold);
+    lblConfidenceThreshold.htmlFor = 'confidenceThreshold';
+    lblConfidenceThreshold.classList.add('range');
+    lblConfidenceThreshold.appendChild(document.createTextNode('Confidence threshold'));
+    const inputConfidenceThreshold = document.createElement('input');
+    p.appendChild(document.createTextNode('1'));
+    p.appendChild(inputConfidenceThreshold);
+    p.appendChild(document.createTextNode('100'));
+    inputConfidenceThreshold.id = 'confidenceThreshold';
+    inputConfidenceThreshold.type = 'range';
+    inputConfidenceThreshold.value = DEFAULTS.CONFIDENCE_THRESHOLD.toString();
+    inputConfidenceThreshold.min = '0';
+    inputConfidenceThreshold.max = '100';
+    inputConfidenceThreshold.step = '1';
+
+    const lblLowConfidenceMarker = document.createElement('label');
+    p.appendChild(lblLowConfidenceMarker);
+    lblLowConfidenceMarker.htmlFor = 'lowConfidenceMarker';
+    lblLowConfidenceMarker.appendChild(document.createTextNode('Low confidence marker'));
+    const inputLowConfidenceMarker = document.createElement('input');
+    p.appendChild(inputLowConfidenceMarker);
+    inputLowConfidenceMarker.id = 'lowConfidenceMarker';
+    inputLowConfidenceMarker.type = 'text';
+    inputLowConfidenceMarker.value = DEFAULTS.LOW_CONFIDENCE_MARKER;
+  }
+
+  return form;
+}
+
 async function init(): Promise<void> {
   const appMessageContainer = new MessageContainer('Loading...please wait.');
   const appRequestContainer = document.createElement('main');
   appRequestContainer.id = 'appRequestContainer';
 
+  document.body.appendChild(createOptionsForm());
   document.body.appendChild(appMessageContainer.el);
   document.body.appendChild(appRequestContainer);
 
